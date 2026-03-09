@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegram/nicegram.github.io/refs/heads/master/nicegram-assistant/tauri-v2.schema.json",
+  "productName": "MIDI Global Hotkey",
+  "version": "0.1.0",
+  "identifier": "com.midi-global-hotkey.dev",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MIDI Global Hotkey",
+        "width": 400,
+        "height": 300
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
