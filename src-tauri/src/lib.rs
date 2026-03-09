@@ -6,6 +6,8 @@ struct AppState {
     midi_out: Option<MidiOutputConnection>,
     toggle: bool,
     selected_port: Option<String>,
+    current_shortcut: String,
+    paused: bool,
 }
 
 #[tauri::command]
@@ -40,7 +42,53 @@ fn select_output(name: String, state: tauri::State<'_, Mutex<AppState>>) -> Resu
     Ok(())
 }
 
+#[tauri::command]
+fn change_shortcut(
+    shortcut_str: String,
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, Mutex<AppState>>,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    let new_shortcut = shortcut_str.parse::<Shortcut>().map_err(|e| format!("{e:?}"))?;
+
+    let mut app_state = state.lock().map_err(|e| e.to_string())?;
+    let old_shortcut = app_state.current_shortcut.parse::<Shortcut>().map_err(|e| format!("{e:?}"))?;
+
+    app_handle
+        .global_shortcut()
+        .unregister(old_shortcut)
+        .map_err(|e| e.to_string())?;
+
+    let handle = app_handle.clone();
+    app_handle
+        .global_shortcut()
+        .on_shortcut(new_shortcut, move |_app, _shortcut, event| {
+            if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                return;
+            }
+            let state = handle.state::<Mutex<AppState>>();
+            let mut app_state = state.lock().unwrap();
+            if let Some(value) = send_midi_cc(&mut app_state) {
+                let _ = handle.emit("midi-fired", value);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+
+    app_state.current_shortcut = shortcut_str;
+    Ok(())
+}
+
+#[tauri::command]
+fn set_paused(paused: bool, state: tauri::State<'_, Mutex<AppState>>) -> Result<(), String> {
+    state.lock().map_err(|e| e.to_string())?.paused = paused;
+    Ok(())
+}
+
 fn send_midi_cc(state: &mut AppState) -> Option<u8> {
+    if state.paused {
+        return None;
+    }
     if let Some(ref mut conn) = state.midi_out {
         state.toggle = !state.toggle;
         let value = if state.toggle { 127 } else { 0 };
@@ -60,8 +108,10 @@ pub fn run() {
             midi_out: None,
             toggle: false,
             selected_port: None,
+            current_shortcut: "CmdOrCtrl+Shift+M".to_string(),
+            paused: false,
         }))
-        .invoke_handler(tauri::generate_handler![list_outputs, select_output])
+        .invoke_handler(tauri::generate_handler![list_outputs, select_output, change_shortcut, set_paused])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
