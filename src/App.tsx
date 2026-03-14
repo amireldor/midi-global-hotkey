@@ -9,9 +9,13 @@ function keyEventToShortcut(e: KeyboardEvent): { tauri: string; display: string 
   const modifiers: string[] = [];
   const displayMods: string[] = [];
 
-  if (e.metaKey || e.ctrlKey) {
-    modifiers.push("CmdOrCtrl");
-    displayMods.push(isMac ? "⌘" : "Ctrl+");
+  if (e.metaKey) {
+    modifiers.push("Command");
+    displayMods.push(isMac ? "⌘" : "Super+");
+  }
+  if (e.ctrlKey) {
+    modifiers.push("Control");
+    displayMods.push(isMac ? "⌃" : "Ctrl+");
   }
   if (e.shiftKey) {
     modifiers.push("Shift");
