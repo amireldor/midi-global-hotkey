@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Store } from "@tauri-apps/plugin-store";
 
 const isMac = navigator.platform.includes("Mac");
 
@@ -26,16 +27,48 @@ function keyEventToShortcut(e: KeyboardEvent): { tauri: string; display: string 
   const ignoredKeys = ["Meta", "Control", "Shift", "Alt"];
   if (ignoredKeys.includes(e.key)) return null;
 
-  const keyMap: Record<string, string> = {
-    " ": "Space",
-    ArrowUp: "Up",
-    ArrowDown: "Down",
-    ArrowLeft: "Left",
-    ArrowRight: "Right",
+  // Derive key from e.code (physical key, unaffected by modifiers like Shift).
+  // e.g. Shift+` gives e.key="~" but e.code="Backquote" → "`"
+  const codeMap: Record<string, [string, string]> = {
+    Space: ["Space", "Space"],
+    ArrowUp: ["Up", "↑"],
+    ArrowDown: ["Down", "↓"],
+    ArrowLeft: ["Left", "←"],
+    ArrowRight: ["Right", "→"],
+    Backquote: ["`", "`"],
+    Minus: ["-", "-"],
+    Equal: ["=", "="],
+    BracketLeft: ["[", "["],
+    BracketRight: ["]", "]"],
+    Backslash: ["\\", "\\"],
+    Semicolon: [";", ";"],
+    Quote: ["'", "'"],
+    Comma: [",", ","],
+    Period: [".", "."],
+    Slash: ["/", "/"],
+    Backspace: ["Backspace", "⌫"],
+    Delete: ["Delete", "⌦"],
+    Tab: ["Tab", "⇥"],
+    Enter: ["Enter", "↵"],
+    Escape: ["Escape", "Esc"],
   };
 
-  const key = keyMap[e.key] || e.key.toUpperCase();
-  const displayKey = keyMap[e.key] || e.key.toUpperCase();
+  let key: string;
+  let displayKey: string;
+  if (e.code in codeMap) {
+    [key, displayKey] = codeMap[e.code];
+  } else if (e.code.startsWith("Key")) {
+    key = e.code.slice(3);        // "KeyA" → "A"
+    displayKey = key;
+  } else if (e.code.startsWith("Digit")) {
+    key = e.code.slice(5);        // "Digit1" → "1"
+    displayKey = key;
+  } else if (/^F\d+$/.test(e.code)) {
+    key = e.code;                 // "F1"–"F12"
+    displayKey = key;
+  } else {
+    return null;                  // unrecognized key
+  }
 
   return {
     tauri: [...modifiers, key].join("+"),
@@ -65,7 +98,32 @@ function App() {
   };
 
   useEffect(() => {
-    loadOutputs();
+    async function init() {
+      await loadOutputs();
+
+      const store = await Store.load("settings.json");
+      const savedHotkeyTauri = await store.get<string>("hotkey_tauri");
+      const savedHotkeyDisplay = await store.get<string>("hotkey_display");
+      const savedOutput = await store.get<string>("midi_output");
+
+      if (savedHotkeyTauri && savedHotkeyDisplay) {
+        setHotkeyDisplay(savedHotkeyDisplay);
+        setHotkeyTauri(savedHotkeyTauri);
+        try {
+          await invoke("change_shortcut", { shortcutStr: savedHotkeyTauri });
+        } catch { /* keep default */ }
+      }
+
+      if (savedOutput) {
+        setSelected(savedOutput);
+        try {
+          await invoke("select_output", { name: savedOutput });
+          setConnected(true);
+        } catch { /* device may not be available */ }
+      }
+    }
+
+    init();
 
     const unlisten = listen<number>("midi-fired", (event) => {
       setLastValue(event.payload);
@@ -92,13 +150,17 @@ function App() {
 
       if (e.key === "Enter" && pendingKeys) {
         invoke("change_shortcut", { shortcutStr: pendingKeys.tauri })
-          .then(() => {
+          .then(async () => {
             invoke("set_paused", { paused: false });
             setHotkeyDisplay(pendingKeys.display);
             setHotkeyTauri(pendingKeys.tauri);
             setRebinding(false);
             setPendingKeys(null);
             setError("");
+            const store = await Store.load("settings.json");
+            await store.set("hotkey_tauri", pendingKeys.tauri);
+            await store.set("hotkey_display", pendingKeys.display);
+            await store.save();
           })
           .catch((err) => {
             setError(String(err));
@@ -124,6 +186,9 @@ function App() {
       setConnected(true);
       setLastValue(null);
       setError("");
+      const store = await Store.load("settings.json");
+      await store.set("midi_output", name);
+      await store.save();
     } catch (e) {
       setConnected(false);
       setError(String(e));
